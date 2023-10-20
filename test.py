@@ -20,12 +20,14 @@ def deleteBuffer(fbo, color_buf, depth_buf, width, height ):
 def myglReadColorBuffer(fbo, color_buf, depth_buf, width, height):
     glReadBuffer(GL_COLOR_ATTACHMENT0)
     glPixelStorei(GL_PACK_ALIGNMENT, 1)
-    data = glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE)
+    res = np.zeros((width*height*4), dtype=np.uint8)
+    
+    glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, res.ctypes.data_as(ctypes.c_void_p))
+    res = res.reshape(height, width, -1)
+    return res, width, height
 
-    return data, width, height
 
-
-img = cv2.imread("test.png")
+img = cv2.imread("test.jpg")
 img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
 height,width,c = img.shape
@@ -126,19 +128,15 @@ gl_program = glCreateProgram()
 v_shader = glCreateShader(GL_VERTEX_SHADER)
 p_shader = glCreateShader(GL_FRAGMENT_SHADER)
 
-vertexPositions = np.array(
-    [0.75, 0.75, 0.0, 1.0,
-    0.75, -0.75, 0.0, 1.0, 
-    -0.75, -0.75, 0.0, 1.0],
-    dtype='float32'
-)
 v_shader_src = """
 #version 330 core 
 
 layout(location = 0) in vec4 position;
+out vec3 outpos;
 void main()
 {
    gl_Position = position;
+   outpos = position.xyz;
 }
 """
 
@@ -147,7 +145,7 @@ p_shader_src = """
 out vec4 outputColor;
 void main()
 {
-   outputColor = vec4(1.0f, 1.0f, 1.0f, 1.0f);
+   outputColor = vec4(0.0f, 0.0f, 1.0f, 1.0f);
 }
 """
 
@@ -169,47 +167,68 @@ glAttachShader(gl_program, v_shader)
 glAttachShader(gl_program, p_shader)
 
 glLinkProgram(gl_program)
+glDeleteShader(v_shader)
+glDeleteShader(p_shader)    
 
 
-# positionBufferObject = glGenBuffers(1)
-    
-# glBindBuffer(GL_ARRAY_BUFFER, positionBufferObject)
-# glBufferData( # PyOpenGL allows for the omission of the size parameter
-#     GL_ARRAY_BUFFER,
-#     12,
-#     vertexPositions.ctypes.data_as(ctypes.c_void_p),
-#     GL_STATIC_DRAW
-# )
+status = glGetProgramiv(gl_program, GL_LINK_STATUS)
+if status :
+    test = glGetProgramInfoLog(gl_program)
+    print(test)
+
+
+vertexPositions = np.array(
+    [0.0, 0.0, 0.0, 1.0,
+    0.0, 1.0, 0.0, 1.0, 
+    1.0, 0.0, 0.0, 1.0],
+    dtype='float32'
+)
+
+
+
+positionBufferObject = glGenBuffers(1)
+glBindBuffer(GL_ARRAY_BUFFER, positionBufferObject)
+test = vertexPositions.reshape(-1)
+# glBufferData(GL_ARRAY_BUFFER, vertexPositions.itemsize*vertexPositions.size, test.ctypes.data_as(ctypes.c_void_p), GL_STATIC_DRAW)
+glBufferData(GL_ARRAY_BUFFER, 48, vertexPositions.ctypes.data_as(ctypes.c_void_p), GL_DYNAMIC_DRAW)
 # glBindBuffer(GL_ARRAY_BUFFER, 0)
-
-pos = glGetAttribLocation(gl_program, 'position')
-
 ###
 ##
 
-glEnableVertexAttribArray(pos)
 
-
-glEnable(GL_DEPTH_TEST)
-glClearColor(0.0,0.0,0.0,1.0)
+######################################################
+# glEnable(GL_DEPTH_TEST)
+glClearColor(0.0,0.0,0.0,0.0)
 glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
 
-glUseProgram(gl_program)
-# glBindBuffer(GL_ARRAY_BUFFER, positionBufferObject)
-# glEnableVertexAttribArray(0)
-# glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 0, None)
-glVertexAttribPointer(pos, 4, GL_FLOAT, GL_FALSE, 0, vertexPositions.ctypes.data_as(ctypes.c_void_p))
-print(glGetError())
-glDrawArrays(GL_TRIANGLES, 0, 3)
-print(glGetError())
 
-glDisableVertexAttribArray(0)
+
+# glBindBuffer(GL_ARRAY_BUFFER, positionBufferObject)
+
+pos = glGetAttribLocation(gl_program, 'position')
+print(0)
+vao = glGenVertexArrays(1)
+glBindVertexArray(vao)
+# glVertexAttribPointer(pos, 4, GL_FLOAT, GL_FALSE, 0, vertexPositions.ctypes.data_as(ctypes.c_void_p))
+glEnableVertexAttribArray(0)
+glVertexAttribPointer(pos, 4, GL_FLOAT, GL_FALSE, vertexPositions.itemsize*4, ctypes.c_void_p(0))
+
+glUseProgram(gl_program)
+glBindVertexArray(vao)
+glDrawArrays(GL_TRIANGLES, 0, 100)
+# glDisableVertexAttribArray(pos)
+print(glGetError())
 glUseProgram(0)
 print(glGetError())
 
 
+
+res = np.zeros_like(vertexPositions, dtype=np.float32)
+glGetBufferSubData(GL_ARRAY_BUFFER , 0, 48, res.ctypes.data_as(ctypes.c_void_p))
+print(res)
 data, _, _ = myglReadColorBuffer(fbo, color_buf, depth_buf, width, height)
 cv2.imshow("test", data)
+cv2.waitKey(0)
 
 
 
