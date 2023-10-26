@@ -10,6 +10,33 @@ import uuid
 from win32api import *
 from win32con import *
 from win32gui import *
+
+import glm
+import igl
+v, f = igl.read_triangle_mesh("identity090.obj")
+v, f = igl.read_triangle_mesh("tea.obj")
+mean = np.mean(v, axis=0)
+
+
+vec1 = v[f[:, 1]] - v[f[:, 0]]
+vec2 = v[f[:, 2]] - v[f[:, 0]]
+v_normal = np.zeros_like(v)
+v_normal_denorm = np.zeros((len(v), 1))
+f_normal = np.cross(vec1, vec2, axis=-1)
+for fi, (fn, (vi1,vi2,vi3)) in  enumerate(zip(f_normal, f)):
+    v_normal[vi1] += fn
+    v_normal[vi2] += fn
+    v_normal[vi3] += fn
+    v_normal_denorm[vi1] += 1
+    v_normal_denorm[vi2] += 1
+    v_normal_denorm[vi3] += 1
+v_normal /= v_normal_denorm
+
+# v = (v - mean)
+# v[:, -1] -= 2
+vv = np.concatenate([v, np.ones((v.shape[0], 1))], axis= -1)
+
+
 def deleteBuffer(fbo, color_buf, depth_buf, width, height ):
 
     glBindFramebuffer(GL_FRAMEBUFFER, 0)
@@ -129,23 +156,49 @@ v_shader = glCreateShader(GL_VERTEX_SHADER)
 p_shader = glCreateShader(GL_FRAGMENT_SHADER)
 
 v_shader_src = """
-#version 330 core 
+#version 330 core
+layout (location = 0) in vec4 aPos;
+layout (location = 1) in vec3 anormal;
 
-layout(location = 0) in vec4 position;
-out vec3 outpos;
+uniform mat4 proj;
+uniform mat4 camera;
+uniform mat4 world;
+
+out vec3 FragPos;
+out vec3 Normal;
+
 void main()
 {
-   gl_Position = position;
-   outpos = position.xyz;
+
+    gl_Position = proj*camera*world*aPos; 
+    FragPos = vec3( world * aPos);
+    Normal = anormal;
 }
 """
 
 p_shader_src = """
 #version 330 core
-out vec4 outputColor;
+out vec4 FragColor;
+uniform vec3 lightColor;
+uniform vec3 objectColor;
+
+uniform vec3 lightPos;
+
+in vec3 Normal;
+
+in vec3 FragPos;
+
+
 void main()
 {
-   outputColor = vec4(0.0f, 0.0f, 1.0f, 1.0f);
+    float ambientStrength = 0.1;
+    vec3 ambient = ambientStrength * (lightColor);
+    vec3 norm = normalize(Normal);
+    vec3 lightDir = normalize(lightPos - FragPos);
+    float diff = max(dot(norm, lightDir), 0.0);
+    vec3 diffuse = diff*lightColor;
+    vec3 result = (ambient + diffuse)*objectColor;
+    FragColor = vec4(result, 1.0);
 }
 """
 
@@ -156,13 +209,13 @@ glShaderSource(p_shader, p_shader_src)
 glCompileShader(v_shader)
 if not glGetShaderiv(v_shader, GL_COMPILE_STATUS):
     info_log = glGetShaderInfoLog(v_shader)
-    print ("Compilation Failure for " + str(v_shader) + " shader:\n" + info_log)
+    print ("vertex shader Compilation Failure for " + str(v_shader) + " shader:\n" + str(info_log))
 
 glCompileShader(p_shader)
 if not glGetShaderiv(p_shader, GL_COMPILE_STATUS):
     info_log = glGetShaderInfoLog(p_shader)
-    print ("Compilation Failure for " + str(p_shader) + " shader:\n" + str(info_log))
-
+    print ("pixel shader Compilation Failure for " + str(p_shader) + " shader:\n" + str(info_log))
+    print(p_shader_src)
 glAttachShader(gl_program, v_shader)
 glAttachShader(gl_program, p_shader)
 
@@ -176,59 +229,117 @@ if status :
     test = glGetProgramInfoLog(gl_program)
     print(test)
 
-
-vertexPositions = np.array(
-    [0.0, 0.0, 0.0, 1.0,
-    0.0, 1.0, 0.0, 1.0, 
-    1.0, 0.0, 0.0, 1.0],
-    dtype='float32'
-)
+vv = np.concatenate([vv, v_normal], axis=-1)
+vv = vv.astype(np.float32).reshape(-1)
 
 
+vertexPositions = np.zeros_like(vv, dtype=np.float32)
 
+vertexPositions[...] = vv
+# vertexPositions = np.array(
+    # [-0.5, -0.5, 0.0, 1.0,
+    # 0.5, -0.5, 0.0, 1.0, 
+    # 0.0, 0.5, 0.0, 1.0],
+    # dtype='float32'
+# )
+# f = np.array([0,1,2], dtype=np.uint32)
+f = f.astype(np.uint32).reshape(-1)
+ff = np.zeros_like(f, dtype=np.uint32)
+ff[...] = f
+f = ff
+vao = glGenVertexArrays(1)
 positionBufferObject = glGenBuffers(1)
+# glBindVertexArray(vao)
+print(vertexPositions.data.contiguous)
 glBindBuffer(GL_ARRAY_BUFFER, positionBufferObject)
-test = vertexPositions.reshape(-1)
-# glBufferData(GL_ARRAY_BUFFER, vertexPositions.itemsize*vertexPositions.size, test.ctypes.data_as(ctypes.c_void_p), GL_STATIC_DRAW)
-glBufferData(GL_ARRAY_BUFFER, 48, vertexPositions.ctypes.data_as(ctypes.c_void_p), GL_DYNAMIC_DRAW)
+glBufferData(GL_ARRAY_BUFFER, vertexPositions.itemsize*vertexPositions.size, vertexPositions.ctypes.data_as(ctypes.c_void_p), GL_STATIC_DRAW)
+
+
+IndexBufferObject = glGenBuffers(1)
+glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, IndexBufferObject)
+glBufferData(GL_ELEMENT_ARRAY_BUFFER, f.itemsize*f.size, f.ctypes.data_as(ctypes.c_void_p), GL_STATIC_DRAW)
+# glBufferData(GL_ELEMENT_ARRAY_BUFFER, index.itemsize*index.size, index.ctypes.data_as(ctypes.c_void_p), GL_STATIC_DRAW)
+
+
+
+
+
+
+
+# glBufferData(GL_ARRAY_BUFFER, 48, vertexPositions.ctypes.data_as(ctypes.c_void_p), GL_DYNAMIC_DRAW)
+
+mvp_loc = glGetUniformLocation(gl_program, 'mvp')
+obj_color_loc = glGetUniformLocation(gl_program, 'objectColor')
+light_loc = glGetUniformLocation(gl_program, 'lightColor')
+light_pos_loc = glGetUniformLocation(gl_program, 'lightPos')
+
+glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, vertexPositions.itemsize*7, ctypes.c_void_p(0))
+glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, vertexPositions.itemsize*7, ctypes.c_void_p(4))
+glEnableVertexAttribArray(0)
+
+
 # glBindBuffer(GL_ARRAY_BUFFER, 0)
+glBindVertexArray(0)
+
+
+ob_coord = glm.make_vec3(np.array(0,0,1))
+
+proj = glm.perspective(10, 75, 0.01, 1000.0)
+
 ###
 ##
-
-
+ir = 0
+glViewport(0,0,width,height)
 ######################################################
-# glEnable(GL_DEPTH_TEST)
-glClearColor(0.0,0.0,0.0,0.0)
-glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+while True:
+    glEnable(GL_DEPTH_TEST)
+    glClearColor(0.0,0.0,0.0,0.0)
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
 
 
 
-# glBindBuffer(GL_ARRAY_BUFFER, positionBufferObject)
+    glUseProgram(gl_program)
+    rot = np.identity(4, dtype=np.float32)
+    rot[0,0] *= 0.2#*np.sin(ir)
+    rot[1,1] *= 0.2#*np.sin(ir)
+    rot[2,2] *= 0.2#*np.sin(ir)
+    # rot[0,0] = np.cos(ir)
+    # rot[0,1] = -np.sin(ir)
+    # rot[1,0] = np.sin(ir)
+    # rot[1,1] = np.cos(ir)
+    rot[2, -1] = -1 + 10*np.sin(ir)
 
-pos = glGetAttribLocation(gl_program, 'position')
-print(0)
-vao = glGenVertexArrays(1)
-glBindVertexArray(vao)
-# glVertexAttribPointer(pos, 4, GL_FLOAT, GL_FALSE, 0, vertexPositions.ctypes.data_as(ctypes.c_void_p))
-glEnableVertexAttribArray(0)
-glVertexAttribPointer(pos, 4, GL_FLOAT, GL_FALSE, vertexPositions.itemsize*4, ctypes.c_void_p(0))
-
-glUseProgram(gl_program)
-glBindVertexArray(vao)
-glDrawArrays(GL_TRIANGLES, 0, 100)
-# glDisableVertexAttribArray(pos)
-print(glGetError())
-glUseProgram(0)
-print(glGetError())
+    color = np.array([1.0, 1.0, 0.0], dtype=np.float32)
+    light = np.array([1.0, 1.0, 1.0], dtype=np.float32)
+    lightPos = np.array([0,0, 2.0], dtype=np.float32)
 
 
+    glUniformMatrix4fv(mvp_loc, 1, GL_FALSE,  rot)
+    glUniform3f(light_loc, *color.ravel())
+    glUniform3f(obj_color_loc, *light.ravel())
+    glUniform3f(light_pos_loc, *light.ravel())
 
-res = np.zeros_like(vertexPositions, dtype=np.float32)
-glGetBufferSubData(GL_ARRAY_BUFFER , 0, 48, res.ctypes.data_as(ctypes.c_void_p))
-print(res)
-data, _, _ = myglReadColorBuffer(fbo, color_buf, depth_buf, width, height)
-cv2.imshow("test", data)
-cv2.waitKey(0)
+
+
+    # glBindVertexArray(vao)
+    # glEnableVertexAttribArray(0)
+    # glDrawArrays(GL_TRIANGLES, 0, 3)
+    glDrawElements(GL_TRIANGLES, len(f)//3, GL_UNSIGNED_INT, ctypes.c_void_p(0))
+    # glDisableVertexAttribArray(0)
+    # glDisableVertexAttribArray(pos)
+    glUseProgram(0)
+
+    ir += 0.2
+
+    # res = np.zeros_like(vertexPositions, dtype=np.float32)
+    # glGetBufferSubData(GL_ARRAY_BUFFER , 0, vertexPositions.itemsize*vertexPositions.size, res.ctypes.data_as(ctypes.c_void_p))
+    # print(res)
+    # res = np.zeros_like(ff, dtype=np.uint)
+    # glGetBufferSubData(GL_ELEMENT_ARRAY_BUFFER , 0, res.itemsize*res.size, res.ctypes.data_as(ctypes.c_void_p))
+    # print(res)
+    data, _, _ = myglReadColorBuffer(fbo, color_buf, depth_buf, width, height)
+    cv2.imshow("test", data)
+    cv2.waitKey(100)
 
 
 
