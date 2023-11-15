@@ -17,6 +17,12 @@ v, f = igl.read_triangle_mesh("identity090.obj")
 v, f = igl.read_triangle_mesh("tea.obj")
 mean = np.mean(v, axis=0)
 
+v, f = igl.read_triangle_mesh("cube.obj")
+# v = np.array([[-0.5, 0.0, 0.0],[-0.5, 0.5, 0.0], [0.5, 0.5, 0.0], [0.5, 0.0, 0.0]], dtype=np.float32)
+# f = np.array([[2,1,0],[0,3,2]], dtype=np.uint)
+
+
+
 
 vec1 = v[f[:, 1]] - v[f[:, 0]]
 vec2 = v[f[:, 2]] - v[f[:, 0]]
@@ -161,8 +167,7 @@ layout (location = 0) in vec4 aPos;
 layout (location = 1) in vec3 anormal;
 
 uniform mat4 proj;
-uniform mat4 camera;
-uniform mat4 world;
+uniform mat4 mvp;
 
 out vec3 FragPos;
 out vec3 Normal;
@@ -170,9 +175,9 @@ out vec3 Normal;
 void main()
 {
 
-    gl_Position = proj*camera*world*aPos; 
-    FragPos = vec3( world * aPos);
-    Normal = anormal;
+    gl_Position = proj*mvp*aPos; 
+    //FragPos = vec3( mvp * aPos);
+    //Normal = anormal;
 }
 """
 
@@ -191,14 +196,15 @@ in vec3 FragPos;
 
 void main()
 {
-    float ambientStrength = 0.1;
-    vec3 ambient = ambientStrength * (lightColor);
-    vec3 norm = normalize(Normal);
-    vec3 lightDir = normalize(lightPos - FragPos);
-    float diff = max(dot(norm, lightDir), 0.0);
-    vec3 diffuse = diff*lightColor;
-    vec3 result = (ambient + diffuse)*objectColor;
-    FragColor = vec4(result, 1.0);
+    // float ambientStrength = 0.1;
+    // vec3 ambient = ambientStrength * (lightColor);
+    // vec3 norm = normalize(Normal);
+    // vec3 lightDir = normalize(lightPos - FragPos);
+    // float diff = max(dot(norm, lightDir), 0.0);
+    // vec3 diffuse = diff*lightColor;
+    // vec3 result = (ambient + diffuse)*objectColor;
+    // FragColor = vec4(result, 1.0);
+    FragColor = vec4(lightColor * objectColor, 1.0);
 }
 """
 
@@ -261,13 +267,11 @@ glBufferData(GL_ELEMENT_ARRAY_BUFFER, f.itemsize*f.size, f.ctypes.data_as(ctypes
 # glBufferData(GL_ELEMENT_ARRAY_BUFFER, index.itemsize*index.size, index.ctypes.data_as(ctypes.c_void_p), GL_STATIC_DRAW)
 
 
-
-
-
-
-
+trans = glm.translate(glm.vec3(0, 0, -1))
+proj = glm.frustum(-2, 2, 2, -2, 0.1, 1000)
 # glBufferData(GL_ARRAY_BUFFER, 48, vertexPositions.ctypes.data_as(ctypes.c_void_p), GL_DYNAMIC_DRAW)
 
+proj_loc = glGetUniformLocation(gl_program, 'proj')
 mvp_loc = glGetUniformLocation(gl_program, 'mvp')
 obj_color_loc = glGetUniformLocation(gl_program, 'objectColor')
 light_loc = glGetUniformLocation(gl_program, 'lightColor')
@@ -282,64 +286,99 @@ glEnableVertexAttribArray(0)
 glBindVertexArray(0)
 
 
-ob_coord = glm.make_vec3(np.array(0,0,1))
-
-proj = glm.perspective(10, 75, 0.01, 1000.0)
 
 ###
 ##
 ir = 0
 glViewport(0,0,width,height)
 ######################################################
-while True:
-    glEnable(GL_DEPTH_TEST)
-    glClearColor(0.0,0.0,0.0,0.0)
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+glEnable(GL_DEPTH_TEST)
+glClearColor(0.0,0.0,0.0,0.0)
+glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
 
 
 
-    glUseProgram(gl_program)
-    rot = np.identity(4, dtype=np.float32)
-    rot[0,0] *= 0.2#*np.sin(ir)
-    rot[1,1] *= 0.2#*np.sin(ir)
-    rot[2,2] *= 0.2#*np.sin(ir)
-    # rot[0,0] = np.cos(ir)
-    # rot[0,1] = -np.sin(ir)
-    # rot[1,0] = np.sin(ir)
-    # rot[1,1] = np.cos(ir)
-    rot[2, -1] = -1 + 10*np.sin(ir)
-
-    color = np.array([1.0, 1.0, 0.0], dtype=np.float32)
-    light = np.array([1.0, 1.0, 1.0], dtype=np.float32)
-    lightPos = np.array([0,0, 2.0], dtype=np.float32)
+glUseProgram(gl_program)
 
 
-    glUniformMatrix4fv(mvp_loc, 1, GL_FALSE,  rot)
-    glUniform3f(light_loc, *color.ravel())
-    glUniform3f(obj_color_loc, *light.ravel())
-    glUniform3f(light_pos_loc, *light.ravel())
+color = np.array([1.0, 0.0, 0.0], dtype=np.float32)
+light = np.array([1.0, 1.0, 1.0], dtype=np.float32)
+lightPos = np.array([10,0, 0.0, 1.0], dtype=np.float32)
+
+print(np.array(trans))
+print(np.array(proj))
+glUniformMatrix4fv(proj_loc, 1, GL_FALSE,  glm.value_ptr(proj))
+glUniformMatrix4fv(mvp_loc, 1, GL_FALSE,  glm.value_ptr(trans))
+glUniform3f(light_loc, *color.ravel())
+glUniform3f(obj_color_loc, *light.ravel())
+glUniform3f(light_pos_loc, *light.ravel())
 
 
 
-    # glBindVertexArray(vao)
-    # glEnableVertexAttribArray(0)
-    # glDrawArrays(GL_TRIANGLES, 0, 3)
-    glDrawElements(GL_TRIANGLES, len(f)//3, GL_UNSIGNED_INT, ctypes.c_void_p(0))
-    # glDisableVertexAttribArray(0)
-    # glDisableVertexAttribArray(pos)
-    glUseProgram(0)
+# glBindVertexArray(vao)
+# glEnableVertexAttribArray(0)
+# glDrawArrays(GL_TRIANGLES, 0, 3)
+glDrawElements(GL_TRIANGLES, len(f)//3, GL_UNSIGNED_INT, ctypes.c_void_p(0))
+# glDisableVertexAttribArray(0)
+# glDisableVertexAttribArray(pos)
+glUseProgram(0)
 
-    ir += 0.2
+ir += 0.2
 
-    # res = np.zeros_like(vertexPositions, dtype=np.float32)
-    # glGetBufferSubData(GL_ARRAY_BUFFER , 0, vertexPositions.itemsize*vertexPositions.size, res.ctypes.data_as(ctypes.c_void_p))
-    # print(res)
-    # res = np.zeros_like(ff, dtype=np.uint)
-    # glGetBufferSubData(GL_ELEMENT_ARRAY_BUFFER , 0, res.itemsize*res.size, res.ctypes.data_as(ctypes.c_void_p))
-    # print(res)
-    data, _, _ = myglReadColorBuffer(fbo, color_buf, depth_buf, width, height)
-    cv2.imshow("test", data)
-    cv2.waitKey(100)
+# res = np.zeros_like(vertexPositions, dtype=np.float32)
+# glGetBufferSubData(GL_ARRAY_BUFFER , 0, vertexPositions.itemsize*vertexPositions.size, res.ctypes.data_as(ctypes.c_void_p))
+# print(res)
+# res = np.zeros_like(ff, dtype=np.uint)
+# glGetBufferSubData(GL_ELEMENT_ARRAY_BUFFER , 0, res.itemsize*res.size, res.ctypes.data_as(ctypes.c_void_p))
+# print(res)
+data, _, _ = myglReadColorBuffer(fbo, color_buf, depth_buf, width, height)
+cv2.imshow("test", data)
+cv2.waitKey(0)
+
+
+
+# while True:
+#     glEnable(GL_DEPTH_TEST)
+#     glClearColor(0.0,0.0,0.0,0.0)
+#     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+
+
+
+#     glUseProgram(gl_program)
+   
+
+#     color = np.array([1.0, 0.0, 0.0], dtype=np.float32)
+#     light = np.array([1.0, 1.0, 1.0], dtype=np.float32)
+#     lightPos = np.array([10,0, 0.0, 1.0], dtype=np.float32)
+
+
+#     glUniformMatrix4fv(proj_loc, 1, GL_FALSE,  glm.value_ptr(proj))
+#     glUniformMatrix4fv(mvp_loc, 1, GL_FALSE,  glm.value_ptr(trans))
+#     glUniform3f(light_loc, *color.ravel())
+#     glUniform3f(obj_color_loc, *light.ravel())
+#     glUniform3f(light_pos_loc, *light.ravel())
+
+
+
+#     # glBindVertexArray(vao)
+#     # glEnableVertexAttribArray(0)
+#     # glDrawArrays(GL_TRIANGLES, 0, 3)
+#     glDrawElements(GL_TRIANGLES, len(f)//3, GL_UNSIGNED_INT, ctypes.c_void_p(0))
+#     # glDisableVertexAttribArray(0)
+#     # glDisableVertexAttribArray(pos)
+#     glUseProgram(0)
+
+#     ir += 0.2
+
+#     # res = np.zeros_like(vertexPositions, dtype=np.float32)
+#     # glGetBufferSubData(GL_ARRAY_BUFFER , 0, vertexPositions.itemsize*vertexPositions.size, res.ctypes.data_as(ctypes.c_void_p))
+#     # print(res)
+#     # res = np.zeros_like(ff, dtype=np.uint)
+#     # glGetBufferSubData(GL_ELEMENT_ARRAY_BUFFER , 0, res.itemsize*res.size, res.ctypes.data_as(ctypes.c_void_p))
+#     # print(res)
+#     data, _, _ = myglReadColorBuffer(fbo, color_buf, depth_buf, width, height)
+#     cv2.imshow("test", data)
+#     cv2.waitKey(100)
 
 
 
